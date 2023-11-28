@@ -1,0 +1,588 @@
+---
+title: "Government Contract Prediction"
+description: "A project to practice predicting low interval, zero-inflated data with hierarchical reconcilliation"
+author: "Killian Cimino"
+date: "11/01/2023"
+format: 
+  revealjs:
+    smaller: true
+    scrollable: true
+editor: source
+execute: 
+  cache: refresh
+categories:
+  - "presentation"
+  - "time series"
+  - "machine learning"  
+  
+---
+
+```{r loading data}
+#| include: false
+source(here::here("Scripts","starthere.R"))
+base::load(file=here::here("Data","Cleaned","GrantPresentationData.RDA"))
+
+```
+
+## Context
+
+- The government collects data on how many contracts are granted by state, along with plenty of other data on the contracts.^[around 14 GB per year's worth in a csv format]
+- This can be used to see generally expected trends in the number of contracts by a geographical location without accounting for external factors.
+  - This can be less reliable as external factors can be important in determining how many contracts a region gets (e.g. if a politician starts updating infrastructure, that will require contracts to fulfill)
+  - However, it does avoid the issue of a forecast relying on other forecasts (e.g. if you create a forecast that relies on whether or not a politician has prioritized infrastructure, you will have to predict if infrastructure will be prioritized for every point you want to predict).
+- This analysis uses historical data to predict the number of future contracts based solely on the number of contracts per geographical region in previous years.
+
+## General Look at the data
+
+There are `{r} print(unique_days)` days worth of data and `{r} print(unique_counties) ` unique counties in this dataset. The data was restricted to just the South and Northeast regions, with a random sample of 5 counties per state because this is more an example of what can be done than a super serious analysis (for now).
+
+```{r weekly ts plot}
+ts_plot_weekly
+```
+
+There seems to be pretty consistent seasonality for the overall data, and some sort of trend (although it does change over time). Additionally there are some pretty clear anomalies, such as the time between April 26th and May 24th of 2021, which might cause issues with forecasting. 
+
+```{r weekly trend vs seasonality plot}
+trend_vs_seasonality_plot
+```
+There is strong weekly seasonality for a lot of the states, although the strength of the trend and seasonality seem to differ, so the data will likely benefit from  using different models.
+
+
+## Baseline Model
+
+::: n-col:2
+
+- Mean Forecast
+  - Predicts the mean for each county for every future point in time.
+
+- Best Fit Forecast
+  - Uses both traditional time series and machine learning methods 
+  - Creates a forecast for every county and picks the best based on RMSE
+:::
+
+## Why It Didn't Work
+   
+- This data is low volume intermittent demand at granular levels
+    - Most traditional forecasting methods (and many ML ones) assume continuous data, and this assumption is not met by this data at the county level.
+- Low volume and intermittent demand data is notoriously difficult to forecast
+
+## One potential solution
+
+- Hierarchical Forecasting
+  
+  - Creates a forecast for every node ^[At the bottom level this would be each county, at the second it would be each region, and so forth] for every level in the hierarchy
+  
+  - Current iteration uses minimum trace optimization based on in-sample covariance for reconciliation ^[Explanation of reconciliation in appendix].
+
+## Initial Results - Region
+
+
+::: {.panel-tabset}
+
+### Region 1
+
+```{r region graph 1}
+tst <- region_graph_a
+subplot(tst$plota, tst$plotb)
+```
+
+### Region 2
+
+```{r region graph 2}
+tst <- region_graph_b
+subplot(tst$plota, tst$plotb)
+
+```
+
+
+:::
+
+[Sentence about regions]
+
+## Initial Results - State
+
+
+::: {.panel-tabset}
+
+### State 1
+
+```{r state graph 1}
+tst <- state_graph_a
+subplot(tst$plota,tst$plotb)
+
+
+```
+
+### State 2
+
+```{r state graph 2}
+tst <- state_graph_b
+subplot(tst$plota,tst$plotb)
+
+```
+
+### State 3
+
+```{r state graph 3}
+tst <- state_graph_c
+subplot(tst$plota,tst$plotb)
+
+```
+
+:::
+
+
+[Sentence about randomly selected states]
+
+## Initial Results - Models
+::: {.panel-tabset}
+### RMSE
+```{r model comparison plots}
+tst <- (model_comparison_plots)
+# model_compare(acc)
+tst$models_median_RMSE
+tst$models_won_RMSE
+
+```
+### MAE 
+
+```{r}
+tst$models_median_MAE
+tst$models_won_MAE
+```
+
+
+:::
+[Sentence about errors and how they compare across models]
+
+# Next Steps
+
+- Test several reconciliation methods to find the best
+- Find a better way to find the best STL combination
+- Add a GARCH Model
+- See if treating the data as longitudinal could yield interesting results.
+
+# Appendix
+
+## Reconciliation
+- Four main options
+  1. Top-down
+    - loses information
+    - reliable at aggregate level
+  2. Bottom-up
+    - noisy
+    - does not lose information
+  3. Middle-out
+    - happy medium between top-down and bottom-ups
+  4. MinT
+    - more computationally demanding
+    - likely to be more accurate at all levels
+
+## Sample Hierarchy
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; Tennessee; Florida; Connecticut; Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County; South_Region; Northeast_Region;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> Tennessee
+    South_Region -> Florida
+    Northeast_Region -> Connecticut
+    Tennessee -> Knox_County
+    Tennessee -> Hamilton_County
+    Florida -> DeSoto_County
+    Connecticut -> Middlesex_County
+    Connecticut -> Hartford_County
+
+
+}
+```
+
+Let's say historically each node is split equally between the lower nodes, e.g. half of the contracts in the United States go to the Southern Region and half go to the Northeastern Region
+
+## Reconciliation - Top-down
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; 2;3;4;5;6;7;8;9;10;11;
+	node [shape=circle,style=filled,color=lightgrey]; 1
+
+    1 [label="United States"];
+    2 [label="South Region"];
+    3 [label="Northeast Region"];
+    4 [label="Tennessee"];
+    5 [label="Florida"];
+    6 [label="Connecticut"];
+    7 [label="Knox County"];
+    8 [label="Hamilton County"];
+    9 [label="DeSoto County"];
+    10 [label="Middlesex County"];
+    11 [label="Hartford County"];
+
+
+  1 -> 2
+  1 -> 3
+    2 -> 4
+    2 -> 5
+    3 -> 6
+    4 -> 7
+    4 -> 8
+    5 -> 9
+    6 -> 10
+    6 -> 11
+
+
+}
+```
+
+Forecast at the very top level, then use proportions to divide up the forecasts to lower nodes.
+
+::: aside
+You can use a variety of methods to divy up the forecasts, the most common I've seen are structural and historical. With the structural method, you look at how the hierarchy is constructed and use that to determine the proportions. With the historical method, you can look at a time period based on your use case (I've mostly seen the whole time period used, but there are cases where the data is weird and has to be dealt with in other ways) to see how things have been divvied up in the past.
+:::
+
+---
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; Tennessee; Florida; Connecticut; Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;South_Region; Northeast_Region;
+	node [shape=circle,style=filled,color=lightgrey]; 110
+
+110 -> South_Region
+110 -> Northeast_Region
+
+    South_Region -> Tennessee
+    South_Region -> Florida
+    Northeast_Region -> Connecticut
+    Tennessee -> Knox_County
+    Tennessee -> Hamilton_County
+    Florida -> DeSoto_County
+    Connecticut -> Middlesex_County
+    Connecticut -> Hartford_County
+
+
+}
+```
+
+Let's say we forecasted 110 for the top level, and wanted to use historical proportions where each node contributes equally to the node above.
+
+---
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; Tennessee; Florida; Connecticut; Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County; South_Region; Northeast_Region; 55;
+	node [shape=circle,style=filled,color=lightgrey]; 110
+
+110 -> 55
+110 -> 55
+
+    55 -> 27.5
+    55 -> 27.5
+    55 -> 55
+    27.5 -> 13.75
+    27.5 -> 13.75
+    27.5 -> 27.5
+    55 -> 27.5
+    55 -> 27.5
+
+
+}
+```
+
+You can just divvy up the forecast based on the expected proportions at each level, starting at the top and going down.
+
+## Reconciliation - Bottom-up
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region; Tennessee; Florida; Connecticut; 
+	node [shape=circle,style=filled,color=lightgrey]; Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> Tennessee
+    South_Region -> Florida
+    Northeast_Region -> Connecticut
+    Tennessee -> Knox_County
+    Tennessee -> Hamilton_County
+    Florida -> DeSoto_County
+    Connecticut -> Middlesex_County
+    Connecticut -> Hartford_County
+
+
+}
+```
+
+
+Forecast at the bottom level, then just add them up to get the higher levels of aggregation.
+
+---
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region; Tennessee; Florida; Connecticut; 
+	node [shape=circle,style=filled,color=lightgrey]; Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> Tennessee
+    South_Region -> Florida
+    Northeast_Region -> Connecticut
+    Tennessee -> 5
+    Tennessee -> 5
+    Florida -> 5
+    Connecticut -> 5
+    Connecticut -> 5
+
+
+}
+```
+
+Let's say you forecast 5 for each county
+
+::: aside
+Of course, you usually won't forecast the same number for every node at the bottom row, but this makes it a little easier to focus on the concept rather than the math
+:::
+
+---
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region; Tennessee; Florida; Connecticut; 
+	node [shape=circle,style=filled,color=lightgrey]; Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+
+25 -> 15
+25 -> 10
+
+    15 -> 10
+    15 -> 5
+    10 -> 10
+    10 -> 5
+    10 -> 5
+    5 -> 5
+    10 -> 5
+    10 -> 5
+
+
+}
+```
+
+
+You'd then add up each node to get the number for the node above until you get to the top of the hierarchy.
+
+
+
+
+## Reconciliation - Middle-out
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region;  Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+	node [shape=circle,style=filled,color=lightgrey]; Tennessee; Florida; Connecticut;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> Tennessee
+    South_Region -> Florida
+    Northeast_Region -> Connecticut
+    Tennessee -> Knox_County
+    Tennessee -> Hamilton_County
+    Florida -> DeSoto_County
+    Connecticut -> Middlesex_County
+    Connecticut -> Hartford_County
+
+
+}
+```
+
+
+Forecast at some point in the middle, then add up to get higher levels of aggregation, and use proportions to divide up the forecasts to lower nodes. For this example we'll use historical proportions.
+
+
+
+---
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region;  Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+	node [shape=circle,style=filled,color=lightgrey]; Tennessee; Florida; Connecticut;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> 10
+    South_Region -> 15
+    Northeast_Region -> 30
+    10 -> Knox_County
+    10 -> Hamilton_County
+    15 -> DeSoto_County
+    30 -> Middlesex_County
+    30 -> Hartford_County
+
+
+}
+```
+
+
+Let's say you forecasted the states, 10 for Tennessee, 15 for Florida, and 30 for Connecticut.
+
+---
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region;  Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+	node [shape=circle,style=filled,color=lightgrey]; Tennessee; Florida; Connecticut;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> 10
+    South_Region -> 15
+    Northeast_Region -> 30
+    10 -> 5
+    10 -> 5
+    15 -> 15
+    30 -> 15
+    30 -> 15
+
+
+}
+```
+
+
+You would divide each of those forecasts by the historical proportions to get the values for the nodes below
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; United_States; South_Region; Northeast_Region;  Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+	node [shape=circle,style=filled,color=lightgrey]; Tennessee; Florida; Connecticut;
+
+55 -> 25
+55 -> 30
+
+    25 -> 10
+    25 -> 15
+    30 -> 30
+    10 -> 5
+    10 -> 5
+    15 -> 15
+    30 -> 15
+    30 -> 15
+
+
+}
+```
+
+Then you would add to get the values of higher nodes.
+
+## Reconciliation - MinT
+
+```{dot}
+digraph G {
+
+center=true
+
+	node [shape=circle]; 
+	node [shape=circle,style=filled,color=lightgrey]; Tennessee; Florida; Connecticut; United_States; South_Region; Northeast_Region;  Knox_County; Hamilton_County; DeSoto_County; Middlesex_County; Hartford_County;
+
+United_States -> South_Region
+United_States -> Northeast_Region
+
+    South_Region -> Tennessee
+    South_Region -> Florida
+    Northeast_Region -> Connecticut
+    Tennessee -> Knox_County
+    Tennessee -> Hamilton_County
+    Florida -> DeSoto_County
+    Connecticut -> Middlesex_County
+    Connecticut -> Hartford_County
+
+
+}
+```
+
+
+Forecast at every level and then use linear algebra to minimize the errors at every level. It does this by minimizing the trace of a matrix, and there are several matrices you can use for this based on the data you have. If you want to learn more I'd suggest checking out [forecasting principles and practices 3](). It gives a good overview of the subject, and from there you can choose if you want to read the papers on it (unfortunately I haven't found any good videos that explain the math behind it to recommend).
+
+## Method
+
+-Back tested all plausible models
+
+-Fitted values were rounded 
+
+-Negative fitted values were changed to zero
+
+## Models tested
+
+- stepwise ARIMA (using the fable package, fits the best ARIMA based on a chosen metric)
+- ETS
+- RandomWalk
+- SeasonalNaive
+- Croston
+- STLs
+  - Season 7, trend 51
+  - Season 7, trend 3
+  - Season 7, trend 121
+- Poisson regression
+- Zero inflated Poisson regression
+- XGBoost
+- 
+
+## Sources
+
+Data:
+  - https://www.usaspending.gov/download_center/award_data_archive accessed October 8th
+  - https://www2.census.gov/programs-surveys/popest/geographies/2016/state-geocodes-v2016.xls accessed October 9th
+  
+Math and major packages:
+
+Hyndman, R.J., & Athanasopoulos, G. (2021) Forecasting: principles and practice, 3rd edition, OTexts: Melbourne, Australia. OTexts.com/fpp3. Accessed on October 10, 2023.
+
+Mitchell O'Hara-Wild, Rob Hyndman and Earo Wang (2023). fable: Forecasting Models for Tidy Time Series. R
+  package version 0.3.3. https://CRAN.R-project.org/package=fable
+
+Wickramasuriya, S. L., Athanasopoulos, G., & Hyndman, R. J. (2019). Optimal forecast reconciliation for hierarchical and grouped time series through trace minimization. Journal of the American Statistical Association, 114(526), 804–819. [DOI](https://doi.org/10.1080/01621459.2018.1448825) 
+
+
+
+To see my code for this, check out my notebook [here](timeSeries.qmd)
+
+
